@@ -1,14 +1,10 @@
-import { Component } from '@angular/core';
-import { Subject, merge, interval, NEVER, Observable, combineLatest, BehaviorSubject, concat } from 'rxjs';
-import { mapTo, switchMap, startWith, scan, map, withLatestFrom, take, share, shareReplay } from 'rxjs/operators';
-
-interface CounterState {
-  isTicking: boolean;
-  count: number;
-  countUp: boolean;
-  tickSpeed: number;
-  countDiff: number;
-}
+import { Component, OnDestroy } from '@angular/core';
+import { FormBuilder } from '@angular/forms';
+import { merge, Observable, Subject, Subscription } from 'rxjs';
+import { create } from 'rxjs-spy';
+import { map } from 'rxjs/internal/operators/map';
+import { distinctUntilChanged } from 'rxjs/operators';
+import { CounterFactoryService, CounterState, Counter } from './counter-factory.service';
 
 enum ElementIds {
   TimerDisplay = 'timer-display',
@@ -23,18 +19,15 @@ enum ElementIds {
   InputCountDiff = 'input-count-diff'
 }
 
-type StepperFunc = (value: number) => number;
-
-const increment = (countDiff: number) => (value: number) => value + countDiff;
-const decrement = (countDiff: number) => (value: number) => value - countDiff;
-
-
 @Component({
   selector: 'app-counter',
   templateUrl: './counter.component.html',
-  styleUrls: ['./counter.component.scss']
+  styleUrls: ['./counter.component.scss'],
+  providers: [
+    CounterFactoryService
+  ]
 })
-export class CounterComponent {
+export class CounterComponent implements OnDestroy {
   elementIds = ElementIds;
 
   btnUp = new Subject<Event>();
@@ -43,74 +36,66 @@ export class CounterComponent {
   btnPause = new Subject<Event>();
   btnSetTo = new Subject<Event>();
   btnReset = new Subject<Event>();
-  inputSetTo = new BehaviorSubject<number>(0);
-  inputTicketSpeed = new BehaviorSubject<number>(200);
-  inputCountDiff = new BehaviorSubject<number>(1);
 
-  count = 0;
-  vm$: Observable<CounterState & { startingValue: number }>;
+  counterForm = this.fb.group({
+    tickSpeed: [],
+    startingValue: [],
+    countDiff: []
+  });
+  subs = new Subscription();
+  vm$: Observable<CounterState>;
 
-  constructor() {
+  constructor(counterFactory: CounterFactoryService, private fb: FormBuilder) {
 
-    const countUp$ = merge(
-      this.btnUp.pipe(mapTo(true)),
-      this.btnDown.pipe(mapTo(false))
-    ).pipe(
-      startWith(true)
-    );
+    // enable rxjs-spy
+    // WARNING: in a production app, don't call `create` in code, but use chrome dev tools
+    // (see main.ts for how we've setup rxjs-spy on the global window object)
+    const spy = create();
+    spy.log();
 
-    const stepper$ = combineLatest(countUp$, this.inputCountDiff).pipe(
-      map(([up, countDiff]) => up ? increment(countDiff) : decrement(countDiff))
-    );
+    const counter = counterFactory.get({
+      countDiffChanges$: this.counterForm.controls.countDiff.valueChanges.pipe(this.parseNumber()),
+      down$: this.btnDown,
+      pause$: this.btnPause,
+      resetCounter$: this.btnReset,
+      setToChanges$: this.btnSetTo.pipe(map(() => +this.counterForm.controls.startingValue.value)),
+      start$: this.btnStart,
+      tickSpeedChanges$: this.counterForm.controls.tickSpeed.valueChanges.pipe(this.parseNumber()),
+      up$: this.btnUp
+    });
 
-    const isTicking$ = merge(
-      this.btnStart.pipe(mapTo(true)),
-      this.btnPause.pipe(mapTo(false))
-    ).pipe(
-      startWith(false),
-      shareReplay(1)
-    );
 
-    const setTo$ = concat(
-      this.inputSetTo.pipe(take(1)),
-      this.btnSetTo.pipe(
-        withLatestFrom(this.inputSetTo),
-        map(([, setTo]) => setTo)
+    const formStateChanges$ = this.createFormStateChanges$(counter);
+
+    this.subs.add(formStateChanges$.subscribe(value => {
+      this.counterForm.patchValue(value, { emitEvent: false });
+    }));
+
+    this.vm$ = counter.vm$;
+  }
+
+  ngOnDestroy(): void {
+    this.subs.unsubscribe();
+  }
+
+  private createFormStateChanges$(counter: Counter) {
+    return merge(
+      counter.countDiff$.pipe(
+        distinctUntilChanged(),
+        map(countDiff => ({ countDiff }))
+      ),
+      counter.tickSpeed$.pipe(
+        distinctUntilChanged(),
+        map(tickSpeed => ({ tickSpeed }))
+      ),
+      counter.startingValue$.pipe(
+        distinctUntilChanged(),
+        map(startingValue => ({ startingValue }))
       )
     );
-
-    const counterStarting$ = merge(
-      setTo$,
-      this.btnReset.pipe(mapTo(0))
-    );
-
-    const ticker$ = combineLatest(isTicking$, this.inputTicketSpeed).pipe(
-      switchMap(([isTicking, tickSpeed]) => isTicking ? interval(tickSpeed) : NEVER)
-    );
-
-    const counter = (start: number) => ticker$.pipe(
-      withLatestFrom(stepper$),
-      map(([, stepper]) => stepper),
-      scan<StepperFunc, number>((count, stepper) => stepper(count), start),
-      startWith(start)
-    );
-
-    const count$ = counterStarting$.pipe(switchMap(counter));
-
-    this.vm$ = combineLatest(isTicking$, count$, countUp$, this.inputTicketSpeed, this.inputCountDiff, counterStarting$).pipe(
-      map(([isTicking, count, countUp, tickSpeed, countDiff, startingValue]) => ({
-        isTicking,
-        count,
-        countUp,
-        tickSpeed,
-        countDiff,
-        startingValue
-      }))
-    );
   }
 
-  getInputValue = (event: HTMLInputElement): number => {
-    return parseInt(event['target'].value, 10);
+  private parseNumber() {
+    return (source$: Observable<string>) => source$.pipe(map(v => +v));
   }
-
 }

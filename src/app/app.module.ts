@@ -1,6 +1,7 @@
 import { BrowserModule } from '@angular/platform-browser';
 import { NgModule } from '@angular/core';
 import {RouterModule} from '@angular/router';
+import { ReactiveFormsModule } from '@angular/forms';
 import {APP_ROUTES} from './app-routing.module';
 
 import { AppComponent } from './app.component';
@@ -15,6 +16,7 @@ import {ToArrayPipe} from './to-array.pipe';
   ],
   imports: [
     BrowserModule,
+    ReactiveFormsModule,
     RouterModule.forRoot(APP_ROUTES),
   ],
   providers: [],
