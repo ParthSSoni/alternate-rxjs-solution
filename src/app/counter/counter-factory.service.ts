@@ -14,13 +14,12 @@ export interface CounterState {
 
 export interface CounterInputs {
     countDiffChanges$: Observable<number>;
-    down$: Observable<any>;
+    countUpChanges$: Observable<boolean>;
     pause$: Observable<any>;
     resetCounter$: Observable<any>;
     setToChanges$: Observable<number>;
     start$: Observable<any>;
     tickSpeedChanges$: Observable<number>;
-    up$: Observable<any>;
 }
 
 type StepperFunc = (value: number) => number;
@@ -34,25 +33,23 @@ export class Counter implements OnDestroy {
     countUp$: Observable<boolean>;
     countDiff$: Observable<number>;
     isTicking$: Observable<boolean>;
-    setTo$: Observable<number>;
     startingValue$: Observable<number>;
     tickSpeed$: Observable<number>;
     vm$: Observable<CounterState>;
 
     constructor({
-        countDiffChanges$, down$, pause$, resetCounter$, setToChanges$, start$, tickSpeedChanges$, up$ }: CounterInputs) {
+        countDiffChanges$, countUpChanges$, pause$, resetCounter$, setToChanges$, start$, tickSpeedChanges$ }: CounterInputs) {
 
         this.countDiff$ = this.createCountDiff$(countDiffChanges$);
-        this.countUp$ = this.createCountUp$(down$, up$);
+        this.countUp$ = this.createCountUp$(countUpChanges$);
         this.isTicking$ = this.createIsTicking$(pause$, start$);
-        this.setTo$ = this.createSetTo$(setToChanges$);
         this.tickSpeed$ = this.createTickspeed(tickSpeedChanges$);
 
         const ticker$ = this.createTicker$(this.isTicking$, this.tickSpeed$);
         const stepper$ = this.createStepper$(this.countUp$, this.countDiff$);
         const counter = this.createCounter(ticker$, stepper$);
 
-        this.startingValue$ = this.createStartingValue$(this.setTo$, resetCounter$);
+        this.startingValue$ = this.createStartingValue$(setToChanges$, resetCounter$);
         this.count$ = this.startingValue$.pipe(switchMap(counter), tag('count'));
 
         this.vm$ = this.createViewModel$();
@@ -90,11 +87,8 @@ export class Counter implements OnDestroy {
         );
     }
 
-    private createCountUp$(down$: Observable<any>, up$: Observable<any>): Observable<boolean> {
-        return merge(
-            up$.pipe(mapTo(true)),
-            down$.pipe(mapTo(false))
-        ).pipe(
+    private createCountUp$(countUpChanges$: Observable<boolean>): Observable<boolean> {
+        return countUpChanges$.pipe(
             startWith(true),
             tag('countUp'),
             shareReplay({ refCount: true, bufferSize: 1 })
@@ -107,16 +101,9 @@ export class Counter implements OnDestroy {
         );
     }
 
-    private createSetTo$(setTo$: Observable<number>): Observable<number> {
-        return setTo$.pipe(
-            startWith(0),
-            tag('setTo')
-        );
-    }
-
-    private createStartingValue$(setTo$: Observable<number>, resetCounter$: Observable<any>): Observable<number> {
+    private createStartingValue$(setToChanges$: Observable<number>, resetCounter$: Observable<any>): Observable<number> {
         return merge(
-            setTo$,
+            setToChanges$.pipe(startWith(0)),
             resetCounter$.pipe(mapTo(0))
         ).pipe(
             tag('startingValue'),

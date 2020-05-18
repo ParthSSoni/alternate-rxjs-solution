@@ -3,8 +3,8 @@ import { FormBuilder } from '@angular/forms';
 import { merge, Observable, Subject, Subscription } from 'rxjs';
 import { create } from 'rxjs-spy';
 import { map } from 'rxjs/internal/operators/map';
-import { distinctUntilChanged } from 'rxjs/operators';
-import { CounterFactoryService, CounterState, Counter } from './counter-factory.service';
+import { distinctUntilChanged, first, pluck, switchMap } from 'rxjs/operators';
+import { Counter, CounterFactoryService, CounterState } from './counter-factory.service';
 
 enum ElementIds {
   TimerDisplay = 'timer-display',
@@ -19,6 +19,14 @@ enum ElementIds {
   InputCountDiff = 'input-count-diff'
 }
 
+function pick<T>(key: keyof T) {
+  return (source$: Observable<T>) => source$.pipe(
+    pluck(key),
+    distinctUntilChanged(),
+    map(value => ({ [key]: value }))
+  );
+}
+
 @Component({
   selector: 'app-counter',
   templateUrl: './counter.component.html',
@@ -30,8 +38,7 @@ enum ElementIds {
 export class CounterComponent implements OnDestroy {
   elementIds = ElementIds;
 
-  btnUp = new Subject<Event>();
-  btnDown = new Subject<Event>();
+  countUpChanges = new Subject<boolean>();
   btnStart = new Subject<Event>();
   btnPause = new Subject<Event>();
   btnSetTo = new Subject<Event>();
@@ -54,14 +61,13 @@ export class CounterComponent implements OnDestroy {
     spy.log();
 
     const counter = counterFactory.get({
-      countDiffChanges$: this.counterForm.controls.countDiff.valueChanges.pipe(this.parseNumber()),
-      down$: this.btnDown,
+      countDiffChanges$: this.counterForm.controls.countDiff.valueChanges.pipe(map(v => +v)),
+      countUpChanges$: this.countUpChanges,
       pause$: this.btnPause,
       resetCounter$: this.btnReset,
       setToChanges$: this.btnSetTo.pipe(map(() => +this.counterForm.controls.startingValue.value)),
       start$: this.btnStart,
-      tickSpeedChanges$: this.counterForm.controls.tickSpeed.valueChanges.pipe(this.parseNumber()),
-      up$: this.btnUp
+      tickSpeedChanges$: this.counterForm.controls.tickSpeed.valueChanges.pipe(map(v => +v))
     });
 
 
@@ -80,22 +86,12 @@ export class CounterComponent implements OnDestroy {
 
   private createFormStateChanges$(counter: Counter) {
     return merge(
-      counter.countDiff$.pipe(
-        distinctUntilChanged(),
-        map(countDiff => ({ countDiff }))
-      ),
-      counter.tickSpeed$.pipe(
-        distinctUntilChanged(),
-        map(tickSpeed => ({ tickSpeed }))
-      ),
-      counter.startingValue$.pipe(
-        distinctUntilChanged(),
-        map(startingValue => ({ startingValue }))
-      )
+      counter.vm$.pipe(pick('countDiff')),
+      counter.vm$.pipe(pick('tickSpeed')),
+      counter.vm$.pipe(pick('startingValue')),
+      // startingValue might not have changed, yet setTo input element might have been typed into
+      // and therefore needs synchronizing with the CounterState
+      this.btnReset.pipe(switchMap(() => counter.vm$.pipe(pick('startingValue'), first())))
     );
-  }
-
-  private parseNumber() {
-    return (source$: Observable<string>) => source$.pipe(map(v => +v));
   }
 }

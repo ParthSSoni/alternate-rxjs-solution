@@ -50,14 +50,14 @@
 
 <button type="button"
   id="{{elementIds.BtnUp}}"
-  (click)="btnUp.next($event)"
+  (click)="countUpChanges.next(true)"
   [disabled]="vm.countUp">
   Count Up
 </button>
 
 <button type="button"
   id="{{elementIds.BtnDown}}"
-  (click)="btnDown.next($event)"
+  (click)="countUpChanges.next(false)"
   [disabled]="!vm.countUp">
   Count Down
 </button>
